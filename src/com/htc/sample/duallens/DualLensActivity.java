@@ -2,8 +2,10 @@ package com.htc.sample.duallens;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 
 import android.app.Activity;
+import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 import android.graphics.Bitmap.Config;
 import android.graphics.BitmapFactory;
@@ -11,7 +13,6 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Environment;
 import android.util.Log;
-import android.view.Menu;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.widget.Button;
@@ -20,22 +21,24 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.htc.lib1.duallens.Constants;
-import com.htc.lib1.duallens.DimensionPlusUtility;
 import com.htc.lib1.duallens.DualLens;
 
 public class DualLensActivity extends Activity {
+	
+	private static final String TAG = DualLensActivity.class.getSimpleName();
+	
 	private Button button;
 	private TextView errorText; 
 	private ImageView image;
 	private ImageView origImage;
 	private boolean mIsBokehReady;
-	private int mStrength = 0;	
+	private int mStrength = 60;	
 
-	final String filename = "dualLensSample.jpg"; // copy to root of sdcard
+	final String filename = "dualLensSample.jpg";
 	
 	private File root = Environment.getExternalStorageDirectory();
 	final String filepath = root+"/"+filename;
-
+	Bitmap originalImageBitmap;
 	
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -47,19 +50,26 @@ public class DualLensActivity extends Activity {
 		button = (Button) findViewById(R.id.button1);
 		errorText = (TextView) findViewById(R.id.errorText); 
 		
-    	Bitmap bitmap = BitmapFactory.decodeFile(filepath);
-    	if(bitmap==null) {
+		AssetManager assetManager = getAssets();
+        InputStream istr = null;
+        try { 
+            istr = assetManager.open(filename);
+        } catch (IOException e) {
+            e.printStackTrace();
+        } 
+        originalImageBitmap = BitmapFactory.decodeStream(istr);
+		
+		//originalImageBitmap = BitmapFactory.decodeFile(filepath);
+    	if(originalImageBitmap==null) {
         	Toast.makeText(getBaseContext(),filename+" not found", Toast.LENGTH_LONG).show();
     	} else {
-    		origImage.setImageBitmap(bitmap);
+    		origImage.setImageBitmap(originalImageBitmap);
     		addListenerOnButton();
     	}
-	}
+    	
 
-	@Override
-	public boolean onCreateOptionsMenu(Menu menu) {
-//		getMenuInflater().inflate(R.menu.main, menu);
-		return true;
+	    Log.d(TAG, "originalImageBitmap width = " + originalImageBitmap.getWidth());
+	    Log.d(TAG, "originalImageBitmap height = " + originalImageBitmap.getHeight());
 	}
 
 	public void addListenerOnButton() {
@@ -89,13 +99,34 @@ public class DualLensActivity extends Activity {
 	private void drawMask() {
 		DualLens.Holder<byte[]> buf = mDualLens.new Holder<byte[]>();
 		DualLens.DataInfo datainfo = mDualLens.getStrengthMap(buf);
-	    int [] depthData = new int[datainfo.width * datainfo.height];
-	    int leftByte;
+	    int [] outputImage = new int[datainfo.width * datainfo.height];
+	    int pixelDepth;
+	    
+	    Log.d(TAG, "depth data width = " + datainfo.width);
+	    Log.d(TAG, "depth data height = " + datainfo.height);
+	    Log.d(TAG, "depth data strength = " + datainfo.depth);
+	    
         for(int i = 0; i < datainfo.width * datainfo.height; i++) {
-            leftByte = buf.value[i] & 0x000000ff;
-            depthData[i] = mColorBar[leftByte*500];
+            pixelDepth = buf.value[i] & 0x000000ff;
+                        
+            int depthX = i % datainfo.width;
+            int depthY = i / datainfo.width;
+            
+            int originalX = originalImageBitmap.getWidth() * depthX / datainfo.width;
+            int originalY = originalImageBitmap.getHeight() * depthY / datainfo.height;
+            
+            //Log.d(TAG, "pixelDepth = " + pixelDepth + " at " + depthX + ", " + depthY);
+            
+            //White out background, pick original color from foreground.
+            outputImage[i] = pixelDepth > 64 ? Color.WHITE : 
+            	originalImageBitmap.getPixel(originalX, originalY);
+
+            //outputImage[i] = pixelDepth > 64 ? Color.WHITE : Color.BLACK;
+            
+            // Pick color from color bar based on distance away
+            //outputImage[i] = mColorBar[pixelDepth*500];
         }
-	    Bitmap bmp = Bitmap.createBitmap( depthData, datainfo.width, datainfo.height, Config.ARGB_8888);
+	    Bitmap bmp = Bitmap.createBitmap( outputImage, datainfo.width, datainfo.height, Config.ARGB_8888);
 	    image.setImageBitmap(bmp);
 	    image.setBackgroundColor(Color.WHITE);
 	}
